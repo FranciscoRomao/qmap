@@ -172,18 +172,38 @@ auto HeuristicPlacer::discretizeNonOccupiedEntanglementSites(
   return std::pair{rowIndices, columnIndices};
 }
 
-auto HeuristicPlacer::makeInitialPlacement(const size_t nQubits) const
+auto HeuristicPlacer::makeInitialPlacement(
+    const size_t nQubits, const InitialPlacement& initialPlacement) const
     -> Placement {
+  // Validate the seed and collect the sites it claims so the free-site scan
+  // below never hands one of them out to a different, unseeded qubit.
+  SiteSet seededSites;
+  seededSites.reserve(initialPlacement.size());
+  for (const auto& [qubit, site] : initialPlacement) {
+    if (qubit >= nQubits) {
+      throw std::invalid_argument(
+          "Seeded initial placement refers to a qubit that is not part of "
+          "this quantum computation.");
+    }
+    if (!std::get<0>(site).get().isStorage()) {
+      throw std::invalid_argument(
+          "Seeded initial placement sites must lie in a storage zone; "
+          "seeding an atom that is resting inside an entanglement zone is "
+          "not supported.");
+    }
+    if (!seededSites.emplace(site).second) {
+      throw std::invalid_argument("Seeded initial placement assigns the "
+                                  "same site to more than one qubit.");
+    }
+  }
   auto slmIt = architecture_.get().storageZones.cbegin();
   std::size_t c = 0;
   std::int64_t r = reverseInitialPlacement_
                        ? static_cast<std::int64_t>((*slmIt)->nRows) - 1
                        : 0;
   const std::int64_t step = reverseInitialPlacement_ ? -1 : 1;
-  Placement initialPlacement;
-  initialPlacement.reserve(nQubits);
-  for (qc::Qubit qubit = 0; qubit < nQubits; ++qubit) {
-    initialPlacement.emplace_back(**slmIt, r, c++);
+  const auto advance = [&] {
+    ++c;
     if (c == (*slmIt)->nCols) {
       // the end of the row reached, go to the next row
       r += step;
@@ -195,8 +215,32 @@ auto HeuristicPlacer::makeInitialPlacement(const size_t nQubits) const
         r = step == 1 ? static_cast<std::int64_t>((*slmIt)->nRows) - 1 : 0;
       }
     }
+  };
+  // Returns the next free, unseeded storage site in row-major order,
+  // skipping over every site already claimed by a seeded qubit.
+  const auto nextFreeSite = [&] {
+    Site candidate{**slmIt, static_cast<std::size_t>(r), c};
+    while (seededSites.contains(candidate)) {
+      advance();
+      candidate = Site{**slmIt, static_cast<std::size_t>(r), c};
+    }
+    advance();
+    return candidate;
+  };
+  Placement placement;
+  placement.reserve(nQubits);
+  for (qc::Qubit qubit = 0; qubit < nQubits; ++qubit) {
+    if (const auto it = initialPlacement.find(qubit);
+        it != initialPlacement.cend()) {
+      // this qubit's atom is already known to sit at a specific site (e.g.,
+      // left there by a previous, separate compile() call); keep it resting
+      // there instead of assigning it an arbitrary new site.
+      placement.emplace_back(it->second);
+    } else {
+      placement.emplace_back(nextFreeSite());
+    }
   }
-  return initialPlacement;
+  return placement;
 }
 
 auto HeuristicPlacer::makeIntermediatePlacement(
@@ -1413,24 +1457,45 @@ HeuristicPlacer::HeuristicPlacer(const Architecture& architecture,
 auto HeuristicPlacer::place(
     const size_t nQubits,
     const std::vector<TwoQubitGateLayer>& twoQubitGateLayers,
-    const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits)
-    -> std::vector<Placement> {
-  std::vector<Placement> placement;
-  placement.reserve((2 * twoQubitGateLayers.size()) + 1);
-  placement.emplace_back(makeInitialPlacement(nQubits));
-  for (size_t layer = 0; layer < twoQubitGateLayers.size(); ++layer) {
-    const auto& [gatePlacement, qubitPlacement] = makeIntermediatePlacement(
-        placement.back(),
-        layer == 0 ? std::unordered_set<qc::Qubit>{} : reuseQubits[layer - 1],
-        layer == reuseQubits.size() ? std::unordered_set<qc::Qubit>{}
-                                    : reuseQubits[layer],
-        twoQubitGateLayers[layer],
-        layer == twoQubitGateLayers.size() - 1 ? TwoQubitGateLayer{}
-                                               : twoQubitGateLayers[layer + 1]);
-    placement.emplace_back(gatePlacement);
-    placement.emplace_back(qubitPlacement);
-    SPDLOG_DEBUG("Placed layer: {}", layer);
+    const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits,
+    const InitialPlacement& initialPlacement) -> std::vector<Placement> {
+  const auto tryPlace = [&]() -> std::vector<Placement> {
+    std::vector<Placement> placement;
+    placement.reserve((2 * twoQubitGateLayers.size()) + 1);
+    placement.emplace_back(makeInitialPlacement(nQubits, initialPlacement));
+    for (size_t layer = 0; layer < twoQubitGateLayers.size(); ++layer) {
+      const auto& [gatePlacement, qubitPlacement] = makeIntermediatePlacement(
+          placement.back(),
+          layer == 0 ? std::unordered_set<qc::Qubit>{} : reuseQubits[layer - 1],
+          layer == reuseQubits.size() ? std::unordered_set<qc::Qubit>{}
+                                      : reuseQubits[layer],
+          twoQubitGateLayers[layer],
+          layer == twoQubitGateLayers.size() - 1
+              ? TwoQubitGateLayer{}
+              : twoQubitGateLayers[layer + 1]);
+      placement.emplace_back(gatePlacement);
+      placement.emplace_back(qubitPlacement);
+      SPDLOG_DEBUG("Placed layer: {}", layer);
+    }
+    return placement;
+  };
+  try {
+    return tryPlace();
+  } catch (const WindowTooSmallError& e) {
+    if (!config_.useWindow || config_.windowShare >= 1.0) {
+      // there is no wider window left to retry with
+      throw;
+    }
+    SPDLOG_WARN(
+        "Placement search failed because the search window (share {:.3f}) "
+        "was too narrow ({}); retrying once with the maximum window share "
+        "(1.0).",
+        config_.windowShare, e.what());
+    // widen the window and retry the whole placement once; this is a
+    // persistent adjustment, so subsequent placements on this instance also
+    // benefit from the wider window instead of failing the same way again
+    config_.windowShare = 1.0;
+    return tryPlace();
   }
-  return placement;
 }
 } // namespace na::zoned

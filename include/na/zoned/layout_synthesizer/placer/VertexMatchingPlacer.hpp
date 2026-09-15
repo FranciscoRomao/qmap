@@ -93,17 +93,33 @@ public:
    * @param twoQubitGateLayers The qubit pairs that must be placed for each
    * layer
    * @param reuseQubits A set of qubits that can be reused for each layer
+   * @param initialPlacement optionally seeds the starting site of some
+   * qubits' atoms, see @ref makeInitialPlacement.
    * @return a placement of the qubits for all layers
    */
   [[nodiscard]] auto
   place(size_t nQubits,
         const std::vector<TwoQubitGateLayer>& twoQubitGateLayers,
-        const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits)
+        const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits,
+        const InitialPlacement& initialPlacement = {})
       -> std::vector<Placement> override;
 
 private:
-  /// Generate qubit initial layout
-  auto makeInitialPlacement(size_t nQubits) const -> Placement;
+  /**
+   * @brief Generate qubit initial layout, filling the storage zone row by
+   * row, skipping any sites already claimed by @p initialPlacement.
+   * @param nQubits is the total number of qubits in the quantum computation
+   * @param initialPlacement optionally seeds the starting site of some
+   * qubits' atoms; those qubits are placed exactly there instead of being
+   * assigned the next free site in row-major order.
+   * @throws std::invalid_argument if @p initialPlacement refers to a qubit
+   * that is not in the range `[0, nQubits)`, assigns the same site to more
+   * than one qubit, or seeds a site outside a storage zone.
+   */
+  [[nodiscard]] auto
+  makeInitialPlacement(size_t nQubits,
+                       const InitialPlacement& initialPlacement = {}) const
+      -> Placement;
 
   /**
    * @note implemented following pseudocode in

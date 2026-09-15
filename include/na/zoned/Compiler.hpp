@@ -100,6 +100,9 @@ private:
   std::reference_wrapper<const Architecture> architecture_;
   nlohmann::json config_;
   Statistics statistics_;
+  /// The site every qubit's atom rested at when the last compile() call
+  /// finished; see @ref getFinalPlacement.
+  Placement finalPlacement_;
 
   /**
    * Construct a Compiler instance with the given architecture and
@@ -132,10 +135,19 @@ public:
    * Compile a quantum computation into a neutral atom computation.
    *
    * @param qComp is the quantum computation to compile.
+   * @param initialPlacement optionally seeds the starting site of some
+   * qubits' atoms. This is useful when a circuit is compiled in separate
+   * chunks across multiple compile() calls (e.g., because a scoped barrier
+   * splits it externally) and the atoms placed by a previous call must be
+   * resumed exactly where they were left, instead of being placed at
+   * arbitrary new sites by this call. Qubits not present in it are placed
+   * freely, exactly as if no seed had been given at all. A seeded qubit with
+   * no two-qubit gate in @p qComp simply keeps resting at its seeded site.
    * @return an NAComputation object that represents the compiled quantum
    * circuit.
    */
-  [[nodiscard]] auto compile(const qc::QuantumComputation& qComp)
+  [[nodiscard]] auto compile(const qc::QuantumComputation& qComp,
+                            const InitialPlacement& initialPlacement = {})
       -> NAComputation {
     SPDLOG_INFO("*** MQT QMAP Zoned Neutral Atom Compiler ***");
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
@@ -224,7 +236,7 @@ public:
     SPDLOG_DEBUG("Synthesizing layout...");
     const auto layoutSynthesisStart = std::chrono::system_clock::now();
     const auto& [placement, routing] = LayoutSynthesizer::synthesize(
-        qComp.getNqubits(), twoQubitGateLayers, reuseQubits);
+        qComp.getNqubits(), twoQubitGateLayers, reuseQubits, initialPlacement);
     const auto layoutSynthesisEnd = std::chrono::system_clock::now();
     statistics_.layoutSynthesisTime =
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -234,6 +246,9 @@ public:
         SELF.getLayoutSynthesisStatistics();
     SPDLOG_INFO("Time for layout synthesis: {}us",
                 statistics_.layoutSynthesisTime);
+    // remember where every qubit's atom ends up so a later, separate
+    // compile() call can be seeded with it via getFinalPlacement()
+    finalPlacement_ = placement.back();
 
     SPDLOG_DEBUG("Generating code...");
     const auto codeGenerationStart = std::chrono::system_clock::now();
@@ -254,6 +269,33 @@ public:
             .count();
     SPDLOG_INFO("Total time: {}us", statistics_.totalTime);
     return code;
+  }
+
+  /**
+   * @return the site every qubit's atom rested at when the last compile()
+   * call on this instance finished, as a map from qubit to site. This is
+   * meant to be passed as the `initialPlacement` argument of a later,
+   * separate compile() call (on this or another Compiler instance) that
+   * continues the same physical atoms, so that call's own initial placement
+   * is already consistent with where the atoms actually are, instead of the
+   * caller having to synthesize a bridging move itself.
+   * @note Only sites in a storage zone can currently be seeded back in; if
+   * an atom's last resting site was inside an entanglement zone (e.g., it
+   * was reused across a would-be barrier), it is still reported here but
+   * cannot be used to seed a following compile() call.
+   */
+  [[nodiscard]] auto getFinalPlacement() const -> InitialPlacement {
+    InitialPlacement result;
+    result.reserve(finalPlacement_.size());
+    for (qc::Qubit qubit = 0; qubit < finalPlacement_.size(); ++qubit) {
+      result.emplace(qubit, finalPlacement_[qubit]);
+    }
+    return result;
+  }
+
+  /// @return the architecture this compiler was created for.
+  [[nodiscard]] auto getArchitecture() const -> const Architecture& {
+    return architecture_.get();
   }
 
   /// @return the statistics collected during the compilation process.

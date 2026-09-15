@@ -37,12 +37,16 @@ public:
    * where each layer contains the two-qubit gates to be placed.
    * @param reuseQubits is a vector of qubit sets that can be reused
    * between layers.
+   * @param initialPlacement optionally seeds the starting site of some
+   * qubits' atoms, e.g., to resume from where a previous, separate compile()
+   * call on the same physical atoms left off. Qubits not present in it are
+   * placed freely.
    * @returns A Layout object containing the placement and routing results.
    */
   [[nodiscard]] virtual auto
   synthesize(size_t nQubits,
              const std::vector<TwoQubitGateLayer>& twoQubitGateLayers,
-             const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits)
-      -> Layout = 0;
+             const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits,
+             const InitialPlacement& initialPlacement = {}) -> Layout = 0;
 };
 } // namespace na::zoned

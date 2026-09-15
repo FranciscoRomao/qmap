@@ -32,6 +32,8 @@
 #include <nanobind/stl/map.h>         // NOLINT(misc-include-cleaner)
 #include <nanobind/stl/string.h>      // NOLINT(misc-include-cleaner)
 #include <nanobind/stl/string_view.h> // NOLINT(misc-include-cleaner)
+#include <nanobind/stl/tuple.h>          // NOLINT(misc-include-cleaner)
+#include <nanobind/stl/unordered_map.h>  // NOLINT(misc-include-cleaner)
 #include <nanobind/stl/vector.h>      // NOLINT(misc-include-cleaner)
 // The header <nlohmann/json.hpp> is used, but clang-tidy confuses it with the
 // wrong forward header <nlohmann/json_fwd.hpp>
@@ -41,6 +43,8 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -183,6 +187,48 @@ auto toPythonTypedOps(const na::NAComputation& code) -> nb::list {
       continue;
     }
     throw std::invalid_argument("Unsupported operation for zoned typed output.");
+  }
+  return result;
+}
+
+/// A Python-facing, serializable stand-in for `na::zoned::Site`, since the
+/// underlying SLM type is not itself exposed to Python: (slm_id, row, col).
+using PySite = std::tuple<std::size_t, std::size_t, std::size_t>;
+/// A Python-facing, serializable stand-in for `na::zoned::InitialPlacement`.
+using PyInitialPlacement = std::unordered_map<qc::Qubit, PySite>;
+
+auto findStorageSLMById(const na::zoned::Architecture& arch,
+                        const std::size_t slmId) -> const na::zoned::SLM& {
+  for (const auto& slm : arch.storageZones) {
+    if (slm->id == slmId) {
+      return *slm;
+    }
+  }
+  throw std::invalid_argument(
+      "No storage-zone SLM with id " + std::to_string(slmId) +
+      " in this architecture; only storage-zone sites can be seeded.");
+}
+
+auto toInitialPlacement(const na::zoned::Architecture& arch,
+                        const PyInitialPlacement& pySeed)
+    -> na::zoned::InitialPlacement {
+  na::zoned::InitialPlacement seed;
+  seed.reserve(pySeed.size());
+  for (const auto& [qubit, site] : pySeed) {
+    const auto& [slmId, row, col] = site;
+    seed.emplace(qubit,
+                 na::zoned::Site{findStorageSLMById(arch, slmId), row, col});
+  }
+  return seed;
+}
+
+auto fromFinalPlacement(const na::zoned::InitialPlacement& placement)
+    -> PyInitialPlacement {
+  PyInitialPlacement result;
+  result.reserve(placement.size());
+  for (const auto& [qubit, site] : placement) {
+    const auto& [slm, row, col] = site;
+    result.emplace(qubit, PySite{slm.get().id, row, col});
   }
   return result;
 }
@@ -382,14 +428,17 @@ Raises:
   routingAgnosticCompiler.def(
       "compile",
       [](na::zoned::RoutingAgnosticCompiler& self,
-         const qc::QuantumComputation& qc) -> nb::list {
-        return toPythonTypedOps(self.compile(qc));
+         const qc::QuantumComputation& qc,
+         const PyInitialPlacement& initialPlacement) -> nb::list {
+        return toPythonTypedOps(self.compile(
+            qc, toInitialPlacement(self.getArchitecture(), initialPlacement)));
       },
-      "qc"_a,
+      "qc"_a, "initial_placement"_a = PyInitialPlacement{},
       R"pb(Compile a quantum circuit for the zoned neutral atom architecture.
 
 Args:
     qc: The quantum circuit
+    initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to `(slm_id, row, col)`, e.g., to resume from where a previous, separate `compile()` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
 Returns:
     The compilation result as a typed list of ZonedProgramOp objects.)pb");
@@ -397,17 +446,33 @@ Returns:
   routingAgnosticCompiler.def(
       "compile_naviz",
       [](na::zoned::RoutingAgnosticCompiler& self,
-         const qc::QuantumComputation& qc) -> std::string {
-        return self.compile(qc).toString();
+         const qc::QuantumComputation& qc,
+         const PyInitialPlacement& initialPlacement) -> std::string {
+        return self
+            .compile(qc,
+                     toInitialPlacement(self.getArchitecture(),
+                                        initialPlacement))
+            .toString();
       },
-      "qc"_a,
+      "qc"_a, "initial_placement"_a = PyInitialPlacement{},
       R"pb(Compile a quantum circuit for the zoned neutral atom architecture.
 
 Args:
     qc: The quantum circuit
+    initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to `(slm_id, row, col)`, e.g., to resume from where a previous, separate `compile()` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
 Returns:
     The compilation result as a string in the .naviz format.)pb");
+
+  routingAgnosticCompiler.def(
+      "get_final_placement",
+      [](const na::zoned::RoutingAgnosticCompiler& self) {
+        return fromFinalPlacement(self.getFinalPlacement());
+      },
+      R"pb(Get the site every qubit's atom rested at when the last `compile()` call finished.
+
+Returns:
+    A mapping from qubit index to `(slm_id, row, col)`, suitable for passing as `initial_placement` to a later `compile()` call that continues the same physical atoms.)pb");
 
   routingAgnosticCompiler.def(
       "stats",
@@ -550,14 +615,17 @@ Raises:
   routingAwareCompiler.def(
       "compile",
       [](na::zoned::RoutingAwareCompiler& self,
-         const qc::QuantumComputation& qc) -> nb::list {
-        return toPythonTypedOps(self.compile(qc));
+         const qc::QuantumComputation& qc,
+         const PyInitialPlacement& initialPlacement) -> nb::list {
+        return toPythonTypedOps(self.compile(
+            qc, toInitialPlacement(self.getArchitecture(), initialPlacement)));
       },
-      "qc"_a,
+      "qc"_a, "initial_placement"_a = PyInitialPlacement{},
       R"pb(Compile a quantum circuit for the zoned neutral atom architecture.
 
 Args:
     qc: The quantum circuit
+    initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to `(slm_id, row, col)`, e.g., to resume from where a previous, separate `compile()` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
 Returns:
     The compilation result as a typed list of ZonedProgramOp objects.)pb");
@@ -565,17 +633,33 @@ Returns:
   routingAwareCompiler.def(
       "compile_naviz",
       [](na::zoned::RoutingAwareCompiler& self,
-         const qc::QuantumComputation& qc) -> std::string {
-        return self.compile(qc).toString();
+         const qc::QuantumComputation& qc,
+         const PyInitialPlacement& initialPlacement) -> std::string {
+        return self
+            .compile(qc,
+                     toInitialPlacement(self.getArchitecture(),
+                                        initialPlacement))
+            .toString();
       },
-      "qc"_a,
+      "qc"_a, "initial_placement"_a = PyInitialPlacement{},
       R"pb(Compile a quantum circuit for the zoned neutral atom architecture.
 
 Args:
     qc: The quantum circuit
+    initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to `(slm_id, row, col)`, e.g., to resume from where a previous, separate `compile()` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
 Returns:
     The compilation result as a string in the .naviz format.)pb");
+
+  routingAwareCompiler.def(
+      "get_final_placement",
+      [](const na::zoned::RoutingAwareCompiler& self) {
+        return fromFinalPlacement(self.getFinalPlacement());
+      },
+      R"pb(Get the site every qubit's atom rested at when the last `compile()` call finished.
+
+Returns:
+    A mapping from qubit index to `(slm_id, row, col)`, suitable for passing as `initial_placement` to a later `compile()` call that continues the same physical atoms.)pb");
 
   routingAwareCompiler.def(
       "stats",

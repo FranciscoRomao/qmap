@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from mqt.core import load
+from mqt.core import QuantumComputation, load
 
 from mqt.qmap.na.zoned import AllocOp, RoutingAwareCompiler, ZonedNeutralAtomArchitecture
 
@@ -71,3 +71,27 @@ def test_na_routing_aware_compiler(compiler: RoutingAwareCompiler, circuit_filen
     stats = compiler.stats()
     assert "totalTime" in stats
     assert stats["totalTime"] > 0
+
+
+def test_get_final_placement_seeds_a_later_compile_call() -> None:
+    """A compile() call's ending atom placement can seed a later, independent compile() call.
+
+    This is the API a caller uses to compile a circuit in separate,
+    barrier-delimited chunks without having to synthesize a bridging move
+    themselves between chunks.
+    """
+    architecture = ZonedNeutralAtomArchitecture.from_json_string(architecture_specification)
+    first_compiler = RoutingAwareCompiler(architecture)
+    first_chunk = QuantumComputation(4)
+    first_chunk.cz(0, 1)
+    assert first_compiler.compile(first_chunk) is not None
+
+    final_placement = first_compiler.get_final_placement()
+    assert len(final_placement) == 4
+    for site in final_placement.values():
+        assert len(site) == 3
+
+    second_compiler = RoutingAwareCompiler(architecture)
+    second_chunk = QuantumComputation(4)
+    second_chunk.cz(2, 3)
+    assert second_compiler.compile(second_chunk, final_placement) is not None

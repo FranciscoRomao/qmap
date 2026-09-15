@@ -44,4 +44,13 @@ using Routing = std::vector<std::vector<qc::Qubit>>;
 template <class T> using SiteMap = std::unordered_map<Site, T>;
 /// An unordered set of sites
 using SiteSet = std::unordered_set<Site>;
+/**
+ * A sparse, caller-provided seed for the initial atom placement of a
+ * compile() call, mapping a qubit to the (storage-zone) site the
+ * corresponding atom is already known to occupy, e.g., because it was left
+ * there by a previous, separate compile() call on the same physical atoms.
+ * Qubits not present in this map are placed freely, as if no seed had been
+ * given at all.
+ */
+using InitialPlacement = std::unordered_map<qc::Qubit, Site>;
 } // namespace na::zoned

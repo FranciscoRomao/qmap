@@ -192,13 +192,45 @@ TEST_F(ASAPSchedulerScheduleTest, Barrier) {
                              ::testing::UnorderedElementsAre(
                                  ::testing::UnorderedElementsAre(2U, 3U))));
 }
-TEST_F(ASAPSchedulerScheduleTest, NonGlobalBarrier) {
+TEST_F(ASAPSchedulerScheduleTest, NonGlobalBarrierDoesNotThrow) {
   // q_0: ─░─
   //
   // q_1: ───
   qc::QuantumComputation qc(2);
   qc.emplace_back<qc::StandardOperation>(0, qc::Barrier);
-  EXPECT_THROW(std::ignore = scheduler.schedule(qc), std::invalid_argument);
+  EXPECT_NO_THROW(std::ignore = scheduler.schedule(qc));
+}
+TEST_F(ASAPSchedulerScheduleTest, ScopedBarrierOnlyFencesNamedQubits) {
+  // A barrier scoped to a strict subset of qubits must only act as an
+  // ordering fence for those qubits. It must not force a new layer for
+  // two-qubit gates on qubits it does not name.
+  // q_0: ─■───────────────
+  //       │
+  // q_1: ─■───────────────
+  // q_2: ───░─■───────────
+  //          │
+  // q_3: ────■───────────
+  // q_4: ─────────■───────
+  //               │
+  // q_5: ─────────■───────
+  qc::QuantumComputation qc(6);
+  qc.cz(0, 1);
+  qc.emplace_back<qc::StandardOperation>(2, qc::Barrier);
+  qc.cz(2, 3);
+  qc.cz(4, 5);
+  const auto& [singleQubitGateLayers, twoQubitGateLayers] =
+      scheduler.schedule(qc);
+  // (0, 1) and (4, 5) are unaffected by the barrier scoped to qubit 2 and can
+  // still be scheduled in the same, earliest layer, while (2, 3) is fenced
+  // to a later layer because the barrier names qubit 2.
+  EXPECT_THAT(
+      twoQubitGateLayers,
+      ::testing::ElementsAre(
+          ::testing::UnorderedElementsAre(
+              ::testing::UnorderedElementsAre(0U, 1U),
+              ::testing::UnorderedElementsAre(4U, 5U)),
+          ::testing::UnorderedElementsAre(
+              ::testing::UnorderedElementsAre(2U, 3U))));
 }
 TEST_F(ASAPSchedulerScheduleTest, NonGlobalCompound) {
   qc::QuantumComputation qc(2);

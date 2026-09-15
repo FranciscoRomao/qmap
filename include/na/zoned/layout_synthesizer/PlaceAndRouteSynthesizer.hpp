@@ -100,11 +100,12 @@ public:
   [[nodiscard]] auto
   synthesize(size_t nQubits,
              const std::vector<TwoQubitGateLayer>& twoQubitGateLayers,
-             const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits)
+             const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits,
+             const InitialPlacement& initialPlacement = {})
       -> Layout override {
     const auto& placementStart = std::chrono::system_clock::now();
     const auto& placement =
-        SELF.place(nQubits, twoQubitGateLayers, reuseQubits);
+        SELF.place(nQubits, twoQubitGateLayers, reuseQubits, initialPlacement);
     const auto& placementEnd = std::chrono::system_clock::now();
     const auto& routing = SELF.route(placement);
     const auto& routingEnd = std::chrono::system_clock::now();

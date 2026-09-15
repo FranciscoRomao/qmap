@@ -167,24 +167,41 @@ class RoutingAgnosticCompiler:
             ValueError: If the string is not a valid JSON string
         """
 
-    def compile(self, qc: mqt.core.ir.QuantumComputation) -> list[ZonedProgramOp]:
+    def compile(
+        self,
+        qc: mqt.core.ir.QuantumComputation,
+        initial_placement: dict[int, tuple[int, int, int]] = {},  # noqa: B006
+    ) -> list[ZonedProgramOp]:
         """Compile a quantum circuit for the zoned neutral atom architecture.
 
         Args:
             qc: The quantum circuit
+            initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to ``(slm_id, row, col)``, e.g., to resume from where a previous, separate ``compile()`` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
         Returns:
             The compilation result as a typed list of ZonedProgramOp objects.
         """
 
-    def compile_naviz(self, qc: mqt.core.ir.QuantumComputation) -> str:
+    def compile_naviz(
+        self,
+        qc: mqt.core.ir.QuantumComputation,
+        initial_placement: dict[int, tuple[int, int, int]] = {},  # noqa: B006
+    ) -> str:
         """Compile a quantum circuit for the zoned neutral atom architecture.
 
         Args:
             qc: The quantum circuit
+            initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to ``(slm_id, row, col)``, e.g., to resume from where a previous, separate ``compile()`` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
         Returns:
             The compilation result as a string in the .naviz format.
+        """
+
+    def get_final_placement(self) -> dict[int, tuple[int, int, int]]:
+        """Get the site every qubit's atom rested at when the last ``compile()`` call finished.
+
+        Returns:
+            A mapping from qubit index to ``(slm_id, row, col)``, suitable for passing as ``initial_placement`` to a later ``compile()`` call that continues the same physical atoms.
         """
 
     def stats(self) -> dict[str, float]:
@@ -259,24 +276,41 @@ class RoutingAwareCompiler:
             ValueError: If the string is not a valid JSON string
         """
 
-    def compile(self, qc: mqt.core.ir.QuantumComputation) -> list[ZonedProgramOp]:
+    def compile(
+        self,
+        qc: mqt.core.ir.QuantumComputation,
+        initial_placement: dict[int, tuple[int, int, int]] = {},  # noqa: B006
+    ) -> list[ZonedProgramOp]:
         """Compile a quantum circuit for the zoned neutral atom architecture.
 
         Args:
             qc: The quantum circuit
+            initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to ``(slm_id, row, col)``, e.g., to resume from where a previous, separate ``compile()`` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
         Returns:
             The compilation result as a typed list of ZonedProgramOp objects.
         """
 
-    def compile_naviz(self, qc: mqt.core.ir.QuantumComputation) -> str:
+    def compile_naviz(
+        self,
+        qc: mqt.core.ir.QuantumComputation,
+        initial_placement: dict[int, tuple[int, int, int]] = {},  # noqa: B006
+    ) -> str:
         """Compile a quantum circuit for the zoned neutral atom architecture.
 
         Args:
             qc: The quantum circuit
+            initial_placement: Optionally seeds the starting site of some qubits' atoms as a mapping from qubit index to ``(slm_id, row, col)``, e.g., to resume from where a previous, separate ``compile()`` call on the same physical atoms left off (see :meth:`get_final_placement`). Qubits not present in it are placed freely. Only storage-zone sites can be seeded.
 
         Returns:
             The compilation result as a string in the .naviz format.
+        """
+
+    def get_final_placement(self) -> dict[int, tuple[int, int, int]]:
+        """Get the site every qubit's atom rested at when the last ``compile()`` call finished.
+
+        Returns:
+            A mapping from qubit index to ``(slm_id, row, col)``, suitable for passing as ``initial_placement`` to a later ``compile()`` call that continues the same physical atoms.
         """
 
     def stats(self) -> dict[str, float]:

@@ -335,11 +335,14 @@ public:
    * @param nQubits denotes the number of qubits to be placed
    * @param twoQubitGateLayers are the qubits that must be placed for each layer
    * @param reuseQubits are the qubits that are reused in the next stage
+   * @param initialPlacement optionally seeds the starting site of some
+   * qubits' atoms, see @ref makeInitialPlacement.
    */
   [[nodiscard]] auto
   place(size_t nQubits,
         const std::vector<TwoQubitGateLayer>& twoQubitGateLayers,
-        const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits)
+        const std::vector<std::unordered_set<qc::Qubit>>& reuseQubits,
+        const InitialPlacement& initialPlacement = {})
       -> std::vector<Placement> override;
 
 private:
@@ -686,7 +689,7 @@ private:
       }
     }
     if (!goal) {
-      throw std::runtime_error(
+      throw WindowTooSmallError(
           "No path from start to any goal found. This may be caused by a too "
           "narrow window size. Try adjusting the window_share compiler "
           "configuration option to a higher value, such as 1.0.");
@@ -797,7 +800,7 @@ private:
             "explored nodes.");
       }
     }
-    throw std::runtime_error(
+    throw WindowTooSmallError(
         "No path from start to any goal found. This may be caused by a too "
         "narrow window size. Try adjusting the window_share compiler "
         "configuration option to a higher value, such as 1.0.");
@@ -841,13 +844,25 @@ private:
       -> std::pair<RowColumnMap<uint8_t>, RowColumnMap<uint8_t>>;
 
   /**
-   * @brief This function generates a trivial initial placement for the qubits
-   * and fills up the storage zone row by row in the order of the atoms.
+   * @brief This function generates a trivial initial placement for the
+   * qubits and fills up the storage zone row by row in the order of the
+   * atoms, skipping any sites already claimed by @p initialPlacement.
    * @param nQubits is the total number of qubits in the quantum computation
+   * @param initialPlacement optionally seeds the starting site of some
+   * qubits' atoms; those qubits are placed exactly there instead of being
+   * assigned the next free site in row-major order. Qubits not present in it
+   * are placed freely, exactly as if no seed had been given at all.
    * @return a list of tuples containing the SLM, row, and column of the atom's
    * initial placement
+   * @throws std::invalid_argument if @p initialPlacement refers to a qubit
+   * that is not in the range `[0, nQubits)`, assigns the same site to more
+   * than one qubit, or seeds a site outside a storage zone (seeding an atom
+   * that is resting inside an entanglement zone is not supported).
    */
-  [[nodiscard]] auto makeInitialPlacement(size_t nQubits) const -> Placement;
+  [[nodiscard]] auto
+  makeInitialPlacement(size_t nQubits,
+                       const InitialPlacement& initialPlacement = {}) const
+      -> Placement;
 
   /**
    * @brief Generates the placements for the next two-qubit and single-qubit

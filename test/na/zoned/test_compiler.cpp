@@ -258,6 +258,29 @@ TEST(RoutingAwareCompilerTest, Issue727) {
   EXPECT_TRUE(code.validate().first);
 }
 
+TEST(RoutingAwareCompilerTest, GetFinalPlacementSeedsALaterCompileCall) {
+  // Compiling a circuit in two separate chunks (as a caller would after
+  // splitting it at a scoped barrier) must not require the caller to
+  // synthesize a bridging move: the ending placement of the first chunk can
+  // be fed directly into the second, independent compile() call.
+  const auto arch = Architecture::fromJSONString(architectureSpecification);
+  RoutingAwareCompiler firstCompiler(arch);
+  qc::QuantumComputation firstChunk(4);
+  firstChunk.cz(0, 1);
+  const auto& firstCode = firstCompiler.compile(firstChunk);
+  EXPECT_TRUE(firstCode.validate().first);
+  const auto finalPlacement = firstCompiler.getFinalPlacement();
+  EXPECT_EQ(finalPlacement.size(), 4U);
+
+  // A second, independent compiler instance seeded with that final placement
+  // must accept it and compile successfully.
+  RoutingAwareCompiler secondCompiler(arch);
+  qc::QuantumComputation secondChunk(4);
+  secondChunk.cz(2, 3);
+  EXPECT_NO_THROW(std::ignore =
+                      secondCompiler.compile(secondChunk, finalPlacement));
+}
+
 // Tests that the bug described in issue
 // https://github.com/munich-quantum-toolkit/qmap/issues/792 is fixed.
 constexpr std::string_view architectureSpecification792 = R"({

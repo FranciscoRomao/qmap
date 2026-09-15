@@ -220,7 +220,12 @@ TEST_F(AStarPlacerPlaceTest, TwoTwoQubitLayerReuse) {
   EXPECT_EQ(std::get<1>(placement[2][1]), std::get<1>(placement[3][1]));
   EXPECT_EQ(std::get<2>(placement[2][1]), std::get<2>(placement[3][1]));
 }
-TEST(HeuristicPlacerTest, NoSolution) {
+TEST(HeuristicPlacerTest, WindowTooSmallAutoRetrySucceeds) {
+  // With a window share of 0.0, the first placement attempt fails because
+  // its search window contains no free sites at all. The placer must catch
+  // that failure itself and retry once with the window share maximized
+  // (1.0), which succeeds since the architecture has ample free storage
+  // sites overall. No exception should escape.
   Architecture architecture(Architecture::fromJSONString(architectureJson));
   HeuristicPlacer::Config config = R"({
   "useWindow": true,
@@ -235,10 +240,41 @@ TEST(HeuristicPlacerTest, NoSolution) {
 })"_json;
   HeuristicPlacer placer(architecture, config);
   constexpr size_t nQubits = 2;
-  EXPECT_THROW(
+  EXPECT_NO_THROW(
       std::ignore = placer.place(
           nQubits,
           std::vector<std::vector<std::array<qc::Qubit, 2>>>{{{0U, 1U}}},
+          std::vector<std::unordered_set<qc::Qubit>>{}));
+}
+TEST(HeuristicPlacerTest, NoSolutionEvenWithMaxWindow) {
+  // The architecture only offers 32 entanglement sites, i.e., 16 pairs, so a
+  // single layer that requires 20 simultaneous two-qubit gates can never be
+  // placed, no matter the window size. Since the window share is already at
+  // its maximum (1.0), the placer must not retry and must let the failure
+  // surface immediately.
+  Architecture architecture(Architecture::fromJSONString(architectureJson));
+  HeuristicPlacer::Config config = R"({
+  "useWindow": true,
+  "windowMinWidth": 4,
+  "windowRatio": 1.0,
+  "windowShare": 1.0,
+  "method": "astar",
+  "deepeningFactor": 0.6,
+  "deepeningValue": 0.2,
+  "lookaheadFactor": 0.2,
+  "reuseLevel": 5.0
+})"_json;
+  HeuristicPlacer placer(architecture, config);
+  constexpr size_t nQubits = 40;
+  std::vector<std::array<qc::Qubit, 2>> gates;
+  gates.reserve(20);
+  for (qc::Qubit i = 0; i < 20; ++i) {
+    gates.push_back({static_cast<qc::Qubit>(2 * i),
+                      static_cast<qc::Qubit>((2 * i) + 1)});
+  }
+  EXPECT_THROW(
+      std::ignore = placer.place(
+          nQubits, std::vector<std::vector<std::array<qc::Qubit, 2>>>{gates},
           std::vector<std::unordered_set<qc::Qubit>>{}),
       std::runtime_error);
 }
@@ -318,6 +354,64 @@ TEST(HeuristicPlacerTest, InitialPlacementForTwoSLMs) {
               ::testing::ElementsAre(::testing::Contains(::testing::FieldsAre(
                   ::testing::Field(&SLM::id, ::testing::Eq(1)),
                   ::testing::Lt(18), ::testing::Lt(20)))));
+}
+TEST(HeuristicPlacerTest, InitialPlacementHonorsSeed) {
+  // Qubit 2's atom is seeded to rest at a specific site; the placer must
+  // place it exactly there instead of assigning it a fresh site, and it must
+  // not hand that same site out to any other, unseeded qubit.
+  const auto architecture = Architecture::fromJSONString(architectureJson);
+  HeuristicPlacer placer(architecture, nlohmann::json::parse(configJson));
+  constexpr size_t nQubits = 4;
+  const auto& firstSlm = *architecture.storageZones.front();
+  const InitialPlacement seed{{2, Site{firstSlm, 5, 5}}};
+  const auto& placement = placer.place(
+      nQubits, std::vector<std::vector<std::array<qc::Qubit, 2>>>{},
+      std::vector<std::unordered_set<qc::Qubit>>{}, seed);
+  ASSERT_THAT(placement, ::testing::ElementsAre(::testing::SizeIs(nQubits)));
+  EXPECT_THAT(placement.front()[2],
+              ::testing::FieldsAre(::testing::Eq(std::cref(firstSlm)), 5U,
+                                   5U));
+  for (qc::Qubit q = 0; q < nQubits; ++q) {
+    if (q == 2) {
+      continue;
+    }
+    EXPECT_FALSE(std::get<1>(placement.front()[q]) == 5U &&
+                std::get<2>(placement.front()[q]) == 5U);
+  }
+}
+TEST(HeuristicPlacerTest, InitialPlacementRejectsOutOfRangeQubit) {
+  const auto architecture = Architecture::fromJSONString(architectureJson);
+  HeuristicPlacer placer(architecture, nlohmann::json::parse(configJson));
+  const auto& firstSlm = *architecture.storageZones.front();
+  const InitialPlacement seed{{10U, Site{firstSlm, 0, 0}}};
+  EXPECT_THROW(
+      std::ignore = placer.place(
+          4, std::vector<std::vector<std::array<qc::Qubit, 2>>>{},
+          std::vector<std::unordered_set<qc::Qubit>>{}, seed),
+      std::invalid_argument);
+}
+TEST(HeuristicPlacerTest, InitialPlacementRejectsDuplicateSeedSite) {
+  const auto architecture = Architecture::fromJSONString(architectureJson);
+  HeuristicPlacer placer(architecture, nlohmann::json::parse(configJson));
+  const auto& firstSlm = *architecture.storageZones.front();
+  const InitialPlacement seed{{0U, Site{firstSlm, 0, 0}},
+                              {1U, Site{firstSlm, 0, 0}}};
+  EXPECT_THROW(
+      std::ignore = placer.place(
+          4, std::vector<std::vector<std::array<qc::Qubit, 2>>>{},
+          std::vector<std::unordered_set<qc::Qubit>>{}, seed),
+      std::invalid_argument);
+}
+TEST(HeuristicPlacerTest, InitialPlacementRejectsEntanglementZoneSeed) {
+  const auto architecture = Architecture::fromJSONString(architectureJson);
+  HeuristicPlacer placer(architecture, nlohmann::json::parse(configJson));
+  const auto& entanglementSlm = (*architecture.entanglementZones.front())[0];
+  const InitialPlacement seed{{0U, Site{entanglementSlm, 0, 0}}};
+  EXPECT_THROW(
+      std::ignore = placer.place(
+          4, std::vector<std::vector<std::array<qc::Qubit, 2>>>{},
+          std::vector<std::unordered_set<qc::Qubit>>{}, seed),
+      std::invalid_argument);
 }
 TEST(HeuristicPlacerTest, AStarSearch) {
   // for testing purposes, we do not use the structure of nodes and just use

@@ -68,14 +68,22 @@ auto ASAPScheduler::schedule(const qc::QuantumComputation& qc) const
   std::vector<size_t> nextLayerForQubit(qc.getNqubits(), 0);
   for (const auto& op : qc) {
     if (op->getType() == qc::Barrier) {
-      if (op->getNqubits() < qc.getNqubits()) {
-        throw std::invalid_argument("Only global barriers are allowed.");
-      }
-      // set the next layer for all qubits to the currently last layer
+      // A barrier naming every qubit in the circuit is a full ordering fence:
+      // the next two-qubit gate on any qubit may not be scheduled before the
+      // currently last layer. A barrier scoped to a strict subset of qubits
+      // is only an ordering fence for those qubits; it must not affect the
+      // continuity of placement for any other qubit.
       assert(twoQubitGateLayers.size() + 1 == singleQubitGateLayers.size());
       const auto newNextLayerForQubit = twoQubitGateLayers.size();
-      for (qc::Qubit q = 0; q < qc.getNqubits(); ++q) {
-        nextLayerForQubit[q] = newNextLayerForQubit;
+      const auto barrierQubits = op->getUsedQubits();
+      if (barrierQubits.size() == qc.getNqubits()) {
+        for (qc::Qubit q = 0; q < qc.getNqubits(); ++q) {
+          nextLayerForQubit[q] = newNextLayerForQubit;
+        }
+      } else {
+        for (const auto q : barrierQubits) {
+          nextLayerForQubit[q] = newNextLayerForQubit;
+        }
       }
     } else if (op->isGlobal(qc.getNqubits()) && !op->isControlled() &&
                qc.getNqubits() > 1) {
