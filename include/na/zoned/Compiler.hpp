@@ -33,6 +33,12 @@
 namespace na::zoned {
 #define SELF (*static_cast<ConcreteType*>(this))
 
+/// One physical program and offsets before each full-barrier execution segment.
+struct SegmentedComputation {
+  NAComputation code;
+  std::vector<size_t> boundaryOffsets;
+};
+
 /** @brief Compiler class that combines various components to compile quantum
  * circuits for neutral atom architectures.
  *
@@ -149,6 +155,26 @@ public:
   [[nodiscard]] auto compile(const qc::QuantumComputation& qComp,
                             const InitialPlacement& initialPlacement = {})
       -> NAComputation {
+    return compileImpl<false>(qComp, initialPlacement, nullptr);
+  }
+
+  /// Compile once and retain full-barrier offsets in the generated operations.
+  [[nodiscard]] auto
+  compileSegmented(const qc::QuantumComputation& qComp,
+                   const InitialPlacement& initialPlacement = {})
+      -> SegmentedComputation {
+    SegmentedComputation result;
+    result.code =
+        compileImpl<true>(qComp, initialPlacement, &result.boundaryOffsets);
+    return result;
+  }
+
+private:
+  template <bool Segmented>
+  [[nodiscard]] auto compileImpl(const qc::QuantumComputation& qComp,
+                                 const InitialPlacement& initialPlacement,
+                                 std::vector<size_t>* boundaryOffsets)
+      -> NAComputation {
     SPDLOG_INFO("*** MQT QMAP Zoned Neutral Atom Compiler ***");
 #if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
     if (spdlog::should_log(spdlog::level::debug)) {
@@ -180,7 +206,14 @@ public:
     // removed it.
     SPDLOG_DEBUG("Scheduling...");
     const auto schedulingStart = std::chrono::system_clock::now();
-    const auto& schedule = SELF.schedule(qComp);
+    std::vector<SegmentBoundary> boundaries;
+    const auto schedule = [&]() {
+      if constexpr (Segmented) {
+        return SELF.scheduleWithBoundaries(qComp, boundaries);
+      } else {
+        return SELF.schedule(qComp);
+      }
+    }();
     const auto schedulingEnd = std::chrono::system_clock::now();
     const auto& singleQubitGateLayers = schedule.first;
     const auto& twoQubitGateLayers = schedule.second;
@@ -252,8 +285,9 @@ public:
 
     SPDLOG_DEBUG("Generating code...");
     const auto codeGenerationStart = std::chrono::system_clock::now();
-    NAComputation code =
-        SELF.generate(decomposedSingleQubitGateLayers, placement, routing);
+    NAComputation code = SELF.generate(decomposedSingleQubitGateLayers,
+                                       placement, routing, boundaries,
+                                       boundaryOffsets);
     const auto codeGenerationEnd = std::chrono::system_clock::now();
     assert(code.validate().first);
     statistics_.codeGenerationTime =
@@ -270,6 +304,8 @@ public:
     SPDLOG_INFO("Total time: {}us", statistics_.totalTime);
     return code;
   }
+
+public:
 
   /**
    * @return the site every qubit's atom rested at when the last compile()

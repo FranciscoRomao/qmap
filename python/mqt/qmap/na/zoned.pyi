@@ -182,6 +182,17 @@ class RoutingAgnosticCompiler:
             The compilation result as a typed list of ZonedProgramOp objects.
         """
 
+    def compile_segmented(
+        self,
+        qc: mqt.core.ir.QuantumComputation,
+        initial_placement: dict[int, tuple[int, int, int]] = {},  # noqa: B006
+    ) -> tuple[list[AllocOp], list[list[ZonedProgramOp]]]:
+        """Compile once into allocations and full-barrier execution segments.
+
+        Empty segments are retained. Scoped barriers do not split segments.
+        Flattening allocations and segments reproduces ``compile()``.
+        """
+
     def compile_naviz(
         self,
         qc: mqt.core.ir.QuantumComputation,
@@ -289,6 +300,17 @@ class RoutingAwareCompiler:
 
         Returns:
             The compilation result as a typed list of ZonedProgramOp objects.
+        """
+
+    def compile_segmented(
+        self,
+        qc: mqt.core.ir.QuantumComputation,
+        initial_placement: dict[int, tuple[int, int, int]] = {},  # noqa: B006
+    ) -> tuple[list[AllocOp], list[list[ZonedProgramOp]]]:
+        """Compile once into allocations and full-barrier execution segments.
+
+        Empty segments are retained. Scoped barriers do not split segments.
+        Flattening allocations and segments reproduces ``compile()``.
         """
 
     def compile_naviz(

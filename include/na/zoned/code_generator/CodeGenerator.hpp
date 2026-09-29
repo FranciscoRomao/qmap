@@ -69,14 +69,19 @@ public:
   [[nodiscard]] auto
   generate(const std::vector<SingleQubitGateLayer>& singleQubitGateLayers,
            const std::vector<Placement>& placement,
-           const std::vector<Routing>& routing) const -> NAComputation;
+           const std::vector<Routing>& routing,
+           const std::vector<SegmentBoundary>& boundaries = {},
+           std::vector<size_t>* boundaryOffsets = nullptr) const
+      -> NAComputation;
 
 private:
   /// Append all single-qubit gates of a layer to the code
   auto appendSingleQubitGates(
       size_t nQubits, const SingleQubitGateLayer& singleQubitGates,
       const std::vector<std::reference_wrapper<const Atom>>& atoms,
-      const Zone& globalZone, NAComputation& code) const -> void;
+      const Zone& globalZone, NAComputation& code, size_t layer,
+      const std::vector<SegmentBoundary>& boundaries, size_t& nextBoundary,
+      std::vector<size_t>* boundaryOffsets) const -> void;
 
   /// Append all necessary operations to perform the next set of two-qubit gates
   auto appendTwoQubitGates(

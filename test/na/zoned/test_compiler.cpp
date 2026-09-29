@@ -10,6 +10,7 @@
 
 #include "circuit_optimizer/CircuitOptimizer.hpp"
 #include "ir/QuantumComputation.hpp"
+#include "ir/operations/StandardOperation.hpp"
 #include "na/zoned/Compiler.hpp"
 #include "qasm3/Importer.hpp"
 
@@ -279,6 +280,29 @@ TEST(RoutingAwareCompilerTest, GetFinalPlacementSeedsALaterCompileCall) {
   secondChunk.cz(2, 3);
   EXPECT_NO_THROW(std::ignore =
                       secondCompiler.compile(secondChunk, finalPlacement));
+}
+
+TEST(RoutingAwareCompilerTest, SegmentedOutputMatchesFlatPhysicalProgram) {
+  const auto arch = Architecture::fromJSONString(architectureSpecification);
+  RoutingAwareCompiler compiler(arch);
+  qc::QuantumComputation qc(4);
+  qc.barrier();
+  qc.rz(qc::PI_2, 0);
+  qc.cz(0, 1);
+  qc.barrier();
+  qc.barrier();
+  qc.emplace_back<qc::StandardOperation>(2, qc::Barrier);
+  qc.cz(2, 3);
+  qc.barrier();
+
+  const auto segmented = compiler.compileSegmented(qc);
+  const auto flat = compiler.compile(qc);
+  EXPECT_EQ(segmented.code.toString(), flat.toString());
+  EXPECT_EQ(segmented.boundaryOffsets.size(), 4U);
+  EXPECT_EQ(segmented.boundaryOffsets.front(), 0U);
+  EXPECT_EQ(segmented.boundaryOffsets[1], segmented.boundaryOffsets[2]);
+  EXPECT_EQ(segmented.boundaryOffsets.back(), segmented.code.size());
+  EXPECT_TRUE(segmented.code.validate().first);
 }
 
 // Tests that the bug described in issue

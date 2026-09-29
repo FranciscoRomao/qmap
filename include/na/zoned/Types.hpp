@@ -30,6 +30,11 @@ using SingleQubitGateLayer = std::vector<std::unique_ptr<const qc::Operation>>;
 using QubitPair = std::array<qc::Qubit, 2>;
 /// A list of two-qubit gates representing a two-qubit gate layer.
 using TwoQubitGateLayer = std::vector<QubitPair>;
+/// A full barrier's position before the next single-qubit gate in a layer.
+struct SegmentBoundary {
+  size_t layer;
+  size_t singleQubitGateIndex;
+};
 /// Placement of one layer as a mapping from qubits (indices) to sites
 using Placement = std::vector<Site>;
 /**

@@ -69,5 +69,11 @@ public:
   [[nodiscard]] auto schedule(const qc::QuantumComputation& qc) const
       -> std::pair<std::vector<SingleQubitGateRefLayer>,
                    std::vector<TwoQubitGateLayer>>;
+  /// Schedule once and report every full-circuit barrier in input order.
+  [[nodiscard]] auto scheduleWithBoundaries(
+      const qc::QuantumComputation& qc,
+      std::vector<SegmentBoundary>& boundaries) const
+      -> std::pair<std::vector<SingleQubitGateRefLayer>,
+                   std::vector<TwoQubitGateLayer>>;
 };
 } // namespace na::zoned

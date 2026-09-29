@@ -192,6 +192,29 @@ TEST_F(ASAPSchedulerScheduleTest, Barrier) {
                              ::testing::UnorderedElementsAre(
                                  ::testing::UnorderedElementsAre(2U, 3U))));
 }
+TEST_F(ASAPSchedulerScheduleTest, FullBarrierBoundariesRetainEmptyIntervals) {
+  qc::QuantumComputation qc(2);
+  qc.barrier();
+  qc.rz(qc::PI, 0);
+  qc.barrier();
+  qc.barrier();
+  qc.rz(qc::PI_2, 1);
+  qc.emplace_back<qc::StandardOperation>(0, qc::Barrier);
+  qc.barrier();
+  std::vector<SegmentBoundary> boundaries;
+  const auto [singleLayers, twoLayers] =
+      scheduler.scheduleWithBoundaries(qc, boundaries);
+  ASSERT_EQ(singleLayers.size(), 1U);
+  EXPECT_TRUE(twoLayers.empty());
+  ASSERT_EQ(boundaries.size(), 4U);
+  EXPECT_EQ(boundaries[0].singleQubitGateIndex, 0U);
+  EXPECT_EQ(boundaries[1].singleQubitGateIndex, 1U);
+  EXPECT_EQ(boundaries[2].singleQubitGateIndex, 1U);
+  EXPECT_EQ(boundaries[3].singleQubitGateIndex, 2U);
+  for (const auto& boundary : boundaries) {
+    EXPECT_EQ(boundary.layer, 0U);
+  }
+}
 TEST_F(ASAPSchedulerScheduleTest, NonGlobalBarrierDoesNotThrow) {
   // q_0: ─░─
   //

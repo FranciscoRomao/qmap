@@ -55,6 +55,15 @@ ASAPScheduler::ASAPScheduler(const Architecture& architecture,
 auto ASAPScheduler::schedule(const qc::QuantumComputation& qc) const
     -> std::pair<std::vector<SingleQubitGateRefLayer>,
                  std::vector<TwoQubitGateLayer>> {
+  std::vector<SegmentBoundary> ignored;
+  return scheduleWithBoundaries(qc, ignored);
+}
+auto ASAPScheduler::scheduleWithBoundaries(
+    const qc::QuantumComputation& qc,
+    std::vector<SegmentBoundary>& boundaries) const
+    -> std::pair<std::vector<SingleQubitGateRefLayer>,
+                 std::vector<TwoQubitGateLayer>> {
+  boundaries.clear();
   if (qc.empty()) {
     // early exit if there are no operations to schedule
     return std::pair{std::vector<SingleQubitGateRefLayer>{},
@@ -77,6 +86,8 @@ auto ASAPScheduler::schedule(const qc::QuantumComputation& qc) const
       const auto newNextLayerForQubit = twoQubitGateLayers.size();
       const auto barrierQubits = op->getUsedQubits();
       if (barrierQubits.size() == qc.getNqubits()) {
+        boundaries.push_back({twoQubitGateLayers.size(),
+                              singleQubitGateLayers.back().size()});
         for (qc::Qubit q = 0; q < qc.getNqubits(); ++q) {
           nextLayerForQubit[q] = newNextLayerForQubit;
         }

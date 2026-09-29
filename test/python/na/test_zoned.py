@@ -13,9 +13,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from mqt.core import QuantumComputation, load
+from mqt.core import load
+from mqt.core.ir import QuantumComputation
 
-from mqt.qmap.na.zoned import AllocOp, RoutingAwareCompiler, ZonedNeutralAtomArchitecture
+from mqt.qmap.na.zoned import AllocOp, RoutingAgnosticCompiler, RoutingAwareCompiler, ZonedNeutralAtomArchitecture
+
+
+def operation_signature(op: object) -> tuple[type, tuple[tuple[str, object], ...]]:
+    """Compare typed operation values across independent compiler calls."""
+    fields = ("atom_id", "position", "angle", "theta", "phi", "lambda_", "atom_ids", "targets")
+    return type(op), tuple((name, getattr(op, name)) for name in fields if hasattr(op, name))
+
 
 # get the circuit directory of the project
 circ_dir = Path(__file__).resolve().parent.parent.parent / "na" / "zoned" / "circuits"
@@ -95,3 +103,41 @@ def test_get_final_placement_seeds_a_later_compile_call() -> None:
     second_chunk = QuantumComputation(4)
     second_chunk.cz(2, 3)
     assert second_compiler.compile(second_chunk, final_placement) is not None
+
+
+def test_segmented_compile_preserves_empty_barrier_segments(compiler: RoutingAwareCompiler) -> None:
+    """Full barriers delimit execution even when a segment has no gates."""
+    qc = QuantumComputation(2)
+    qc.barrier()
+    qc.rz(0.5, 0)
+    qc.barrier()
+    qc.barrier()
+
+    allocations, segments = compiler.compile_segmented(qc)
+    assert len(allocations) == 2
+    assert [len(segment) for segment in segments] == [0, 1, 0, 0]
+    assert [operation_signature(op) for op in allocations + [op for segment in segments for op in segment]] == [
+        operation_signature(op) for op in compiler.compile(qc)
+    ]
+
+
+@pytest.mark.parametrize("compiler_type", [RoutingAwareCompiler, RoutingAgnosticCompiler])
+def test_segmented_compile_matches_flat_program_with_scoped_barrier(compiler_type: type) -> None:
+    """Scoped fences preserve one segment; physical operations and placement stay flat-identical."""
+    architecture = ZonedNeutralAtomArchitecture.from_json_string(architecture_specification)
+    compiler = compiler_type(architecture)
+    qc = QuantumComputation(4)
+    qc.rz(0.25, 0)
+    qc.cz(0, 1)
+    qc.barrier([2])
+    qc.cz(2, 3)
+    qc.barrier()
+    qc.rz(0.5, 1)
+
+    allocations, segments = compiler.compile_segmented(qc)
+    flat = compiler.compile(qc)
+
+    assert len(segments) == 2
+    assert [operation_signature(op) for op in allocations + [op for segment in segments for op in segment]] == [
+        operation_signature(op) for op in flat
+    ]

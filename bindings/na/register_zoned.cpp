@@ -191,6 +191,36 @@ auto toPythonTypedOps(const na::NAComputation& code) -> nb::list {
   return result;
 }
 
+auto toPythonSegmentedTypedOps(const na::zoned::SegmentedComputation& compiled)
+    -> std::tuple<nb::list, nb::list> {
+  const auto flat = toPythonTypedOps(compiled.code);
+  nb::list allocations;
+  nb::list segments;
+  const auto nAllocations = compiled.code.getInitialLocations().size();
+  for (size_t i = 0; i < nAllocations; ++i) {
+    allocations.append(flat[i]);
+  }
+  // The zoned generator emits one typed operation per physical operation.
+  if (flat.size() != nAllocations + compiled.code.size()) {
+    throw std::logic_error("Unexpected typed zoned operation expansion.");
+  }
+  nb::list current;
+  size_t nextBoundary = 0;
+  for (size_t i = 0; i <= compiled.code.size(); ++i) {
+    while (nextBoundary < compiled.boundaryOffsets.size() &&
+           compiled.boundaryOffsets[nextBoundary] == i) {
+      segments.append(current);
+      current = nb::list();
+      ++nextBoundary;
+    }
+    if (i < compiled.code.size()) {
+      current.append(flat[nAllocations + i]);
+    }
+  }
+  segments.append(current);
+  return {allocations, segments};
+}
+
 /// A Python-facing, serializable stand-in for `na::zoned::Site`, since the
 /// underlying SLM type is not itself exposed to Python: (slm_id, row, col).
 using PySite = std::tuple<std::size_t, std::size_t, std::size_t>;
@@ -444,6 +474,21 @@ Returns:
     The compilation result as a typed list of ZonedProgramOp objects.)pb");
 
   routingAgnosticCompiler.def(
+      "compile_segmented",
+      [](na::zoned::RoutingAgnosticCompiler& self,
+         const qc::QuantumComputation& qc,
+         const PyInitialPlacement& initialPlacement) {
+        return toPythonSegmentedTypedOps(self.compileSegmented(
+            qc, toInitialPlacement(self.getArchitecture(), initialPlacement)));
+      },
+      "qc"_a, "initial_placement"_a = PyInitialPlacement{},
+      R"pb(Compile once and return (allocations, execution_segments).
+
+Each full-circuit barrier starts a new execution segment, including empty
+segments. Scoped barriers only constrain scheduling. Concatenating allocations
+and all segments gives the flat compile() output.)pb");
+
+  routingAgnosticCompiler.def(
       "compile_naviz",
       [](na::zoned::RoutingAgnosticCompiler& self,
          const qc::QuantumComputation& qc,
@@ -629,6 +674,21 @@ Args:
 
 Returns:
     The compilation result as a typed list of ZonedProgramOp objects.)pb");
+
+  routingAwareCompiler.def(
+      "compile_segmented",
+      [](na::zoned::RoutingAwareCompiler& self,
+         const qc::QuantumComputation& qc,
+         const PyInitialPlacement& initialPlacement) {
+        return toPythonSegmentedTypedOps(self.compileSegmented(
+            qc, toInitialPlacement(self.getArchitecture(), initialPlacement)));
+      },
+      "qc"_a, "initial_placement"_a = PyInitialPlacement{},
+      R"pb(Compile once and return (allocations, execution_segments).
+
+Each full-circuit barrier starts a new execution segment, including empty
+segments. Scoped barriers only constrain scheduling. Concatenating allocations
+and all segments gives the flat compile() output.)pb");
 
   routingAwareCompiler.def(
       "compile_naviz",

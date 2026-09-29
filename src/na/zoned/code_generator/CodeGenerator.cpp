@@ -55,8 +55,17 @@ auto isSameMappedSet(Set1&& a, Set2&& b, Map m) -> bool {
 auto CodeGenerator::appendSingleQubitGates(
     const size_t nQubits, const SingleQubitGateLayer& singleQubitGates,
     const std::vector<std::reference_wrapper<const Atom>>& atoms,
-    const Zone& globalZone, NAComputation& code) const -> void {
-  for (const auto& op : singleQubitGates) {
+    const Zone& globalZone, NAComputation& code, const size_t layer,
+    const std::vector<SegmentBoundary>& boundaries, size_t& nextBoundary,
+    std::vector<size_t>* boundaryOffsets) const -> void {
+  for (size_t gate = 0; gate < singleQubitGates.size(); ++gate) {
+    while (nextBoundary < boundaries.size() &&
+           boundaries[nextBoundary].layer == layer &&
+           boundaries[nextBoundary].singleQubitGateIndex == gate) {
+      boundaryOffsets->push_back(code.size());
+      ++nextBoundary;
+    }
+    const auto& op = singleQubitGates[gate];
     // A flag to indicate if the gate is a gate on one qubit.
     // This flag is used for circuit consisting of only one qubit since in this
     // case, global and local gates are the same.
@@ -160,6 +169,13 @@ auto CodeGenerator::appendSingleQubitGates(
         }
       }
     }
+  }
+  while (nextBoundary < boundaries.size() &&
+         boundaries[nextBoundary].layer == layer &&
+         boundaries[nextBoundary].singleQubitGateIndex ==
+             singleQubitGates.size()) {
+    boundaryOffsets->push_back(code.size());
+    ++nextBoundary;
   }
 }
 auto CodeGenerator::appendTwoQubitGates(
@@ -1126,7 +1142,10 @@ auto CodeGenerator::RearrangementGenerator::generate(
 auto CodeGenerator::generate(
     const std::vector<SingleQubitGateLayer>& singleQubitGateLayers,
     const std::vector<Placement>& placement,
-    const std::vector<Routing>& routing) const -> NAComputation {
+    const std::vector<Routing>& routing,
+    const std::vector<SegmentBoundary>& boundaries,
+    std::vector<size_t>* boundaryOffsets) const -> NAComputation {
+  assert(boundaryOffsets != nullptr || boundaries.empty());
   NAComputation code;
   std::vector<std::reference_wrapper<const Zone>> rydbergZones;
   rydbergZones.reserve(architecture_.get().rydbergRangeMinX.size());
@@ -1170,15 +1189,19 @@ auto CodeGenerator::generate(
   }
   assert(2 * singleQubitGateLayers.size() == placement.size() + 1);
   assert(placement.size() == routing.size() + 1);
+  size_t nextBoundary = 0;
   appendSingleQubitGates(atoms.size(), singleQubitGateLayers.front(), atoms,
-                         globalZone, code);
+                         globalZone, code, 0, boundaries, nextBoundary,
+                         boundaryOffsets);
   for (size_t layer = 0; layer + 1 < singleQubitGateLayers.size(); ++layer) {
     appendTwoQubitGates(placement[2 * layer], routing[2 * layer],
                         placement[(2 * layer) + 1], routing[(2 * layer) + 1],
                         placement[2 * (layer + 1)], atoms, rydbergZones, code);
     appendSingleQubitGates(atoms.size(), singleQubitGateLayers[layer + 1],
-                           atoms, globalZone, code);
+                           atoms, globalZone, code, layer + 1, boundaries,
+                           nextBoundary, boundaryOffsets);
   }
+  assert(nextBoundary == boundaries.size());
   return code;
 }
 
