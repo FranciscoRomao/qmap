@@ -151,12 +151,17 @@ auto CodeGenerator::appendSingleQubitGates(
         } else if (op->getType() == qc::Y) {
           code.emplaceBack<LocalUOp>(atoms[qubit], qc::PI, qc::PI_2, qc::PI_2);
         } else if (op->getType() == qc::Vdg) {
-          code.emplaceBack<LocalUOp>(atoms[qubit], -qc::PI_2, qc::PI_2,
+          // Vdg = Rx(-pi/2)
+          code.emplaceBack<LocalUOp>(atoms[qubit], qc::PI_2, qc::PI_2,
                                      -qc::PI_2);
+        } else if (op->getType() == qc::V) {
+          // V = Rx(pi/2)
+          code.emplaceBack<LocalUOp>(atoms[qubit], qc::PI_2, -qc::PI_2,
+                                     qc::PI_2);
         } else if (op->getType() == qc::SX) {
           code.emplaceBack<LocalUOp>(atoms[qubit], qc::PI_2, -qc::PI_2,
                                      qc::PI_2);
-        } else if (op->getType() == qc::SXdg || op->getType() == qc::V) {
+        } else if (op->getType() == qc::SXdg) {
           code.emplaceBack<LocalUOp>(atoms[qubit], -qc::PI_2, -qc::PI_2,
                                      qc::PI_2);
         } else {

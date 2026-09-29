@@ -342,7 +342,7 @@ TEST_F(CodeGeneratorGenerateTest, VGate) {
                     std::vector<std::vector<std::vector<qc::Qubit>>>{})
           .toString(),
       "atom (0.000, 0.000) atom0\n"
-      "@+ u -1.57080 -1.57080 1.57080 atom0\n");
+      "@+ u 1.57080 -1.57080 1.57080 atom0\n");
 }
 TEST_F(CodeGeneratorGenerateTest, VdgGate) {
   const auto& slm = *architecture.storageZones.front();
@@ -355,7 +355,7 @@ TEST_F(CodeGeneratorGenerateTest, VdgGate) {
                     std::vector<std::vector<std::vector<qc::Qubit>>>{})
           .toString(),
       "atom (0.000, 0.000) atom0\n"
-      "@+ u -1.57080 1.57080 -1.57080 atom0\n");
+      "@+ u 1.57080 1.57080 -1.57080 atom0\n");
 }
 TEST_F(CodeGeneratorGenerateTest, SXGate) {
   const auto& slm = *architecture.storageZones.front();
